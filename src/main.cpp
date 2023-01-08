@@ -1,10 +1,13 @@
 #include <Arduino.h>
+#include <time.h>
 
 #include <WiFi.h>
 #include <WebSerialLite.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
 #include <AsyncElegantOTA.h>
+
+#include <MQ135.h>
 
 #include <FirebaseESP32.h>
 #include <addons/TokenHelper.h>
@@ -28,7 +31,17 @@ FirebaseConfig fb_config;
 AsyncWebServer server2(80); // HTTP server descriptor assigned to port 80, used by the OTA and webserial server
 
 int otaFlashMode;
-int sensorValues[3];
+
+struct sensorValue_t {
+  int rawAnalogRead;
+  float ppmReading;
+  tm readAt;
+};
+
+MQ135 sensor(GAS_SENSOR);
+float r0Calibration;
+// int sensorValues[3];
+sensorValue_t sensorValues[3];
 
 void readGasSensor() {
   // The ADC of the GPIO pins are shared with the ADC used by the
@@ -37,7 +50,9 @@ void readGasSensor() {
   WiFi.disconnect(true, false);
 
   for (int i = 0; i < 3; ++i) {
-    sensorValues[i] = analogRead(GAS_SENSOR);
+    sensorValues[i].rawAnalogRead = analogRead(GAS_SENSOR);
+    sensorValues[i].ppmReading = sensor.getPPM();
+    getLocalTime(&sensorValues[i].readAt);
     delay(1000);
   }
 
@@ -52,6 +67,15 @@ void receiveWebSerial(uint8_t* data, size_t len) {
 
   WebSerial.println(d);
 
+  if (d.equals("reboot")) {
+    WebSerial.print("Device restarting ...");
+    WebSerial.print("Refresh this page if it does not automatically reconnect");
+
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(1000);
+    esp_restart();
+  }
+
   if (d.equals("mode")) {
     // Implement Serial command that shows current OTA mode for debugging purposes
     if (otaFlashMode == 1) {
@@ -62,20 +86,35 @@ void receiveWebSerial(uint8_t* data, size_t len) {
     WebSerial.println();
   }
 
-  if (d.equals("read sensor")) {
+  if (d.equals("sensor read")) {
     // Implement serial command that forces sensor read. This will
     // momentarily turn off WiFi
     readGasSensor();
   }
 
-  if (d.equals("show sensor")) {
+  if (d.equals("sensor show")) {
     // Implement serial command that shows contents of sensorValues array
 
     for (int i = 0; i < 3; ++i) {
-      WebSerial.print("GAS: ");
-      WebSerial.println(sensorValues[i]);
-      delay(50);
+      WebSerial.print("RAW: ");
+      WebSerial.println(sensorValues[i].rawAnalogRead);
+      WebSerial.print("PPM: ");
+      WebSerial.println(sensorValues[i].ppmReading);
+      WebSerial.print("TIME: ");
+      tm tempTime = sensorValues[i].readAt;
+      WebSerial.println(asctime(&tempTime));
     }
+  }
+
+  if (d.equals("sensor r0")) {
+    WebSerial.print("R0: ");
+    WebSerial.println(r0Calibration);
+  }
+
+  if (d.equals("time")) {
+    struct tm tempTime;
+    getLocalTime(&tempTime);
+    WebSerial.println(asctime(&tempTime));
   }
 }
 
@@ -116,15 +155,19 @@ void initializeWifiAndOTA() {
 void setup(void) {
   pinMode(OTA_MODE_EN, INPUT);
   if (digitalRead(OTA_MODE_EN) == 0) {
-    // Pull GPIO 13 low to enable to ota flash mode
+    // Pull GPIO 13 low if you want to enable to ota flash mode
     otaFlashMode = 1;
   } else {
     otaFlashMode = 0;
   }
 
+  // Calibrate and test the sensor before WiFi is turned on
+  // because we can no longer use analogRead once WiFi radio is on
   pinMode(GAS_SENSOR, INPUT);
+  r0Calibration = sensor.getRZero();
   for (int i = 0; i < 3; ++i) {
-    sensorValues[i] = analogRead(GAS_SENSOR);
+    sensorValues[i].rawAnalogRead = analogRead(GAS_SENSOR);
+    sensorValues[i].ppmReading = sensor.getPPM();
     delay(1000);
   }
 
@@ -143,6 +186,12 @@ void setup(void) {
     // will be disabled. This ensures that we can reupload code to the device even
     // if we upload broken firmware to it. If OTA flash mode is off, OTA and everything else
     // will still work, but OTA might not be fast or reliable
+    const long GMT_OFFSET_PH = 8;
+    const char* NTP_SERVER1 = "pool.ntp.org";
+    const char* NTP_SERVER2 = "time-a-g.nist.gov";
+    const char* NTP_SERVER3 = "time.google.com";
+    configTime(GMT_OFFSET_PH, 0, NTP_SERVER1, NTP_SERVER2, NTP_SERVER3);
+
     fb_config.api_key = firebaseApiKey;
     fb_config.database_url = firebaseDbUrl;
     fb_config.token_status_callback = tokenStatusCallback;
@@ -162,6 +211,14 @@ void setup(void) {
   digitalWrite(LED_BUILTIN, LOW);
 }
 
+void writeToFirebase(char* path, float value) {
+  if (Firebase.RTDB.setFloat(&fb_dataObject, path, value)) {
+    // If write successful
+  } else {
+    // If write failed
+  }
+}
+
 unsigned long millisSinceLastReady = 0;
 
 void loop(void) {
@@ -174,6 +231,7 @@ void loop(void) {
       // timer, and manually check for every 15th second, we send Firebase.ready() and other
       // fb related operations
 
+      
 
       WebSerial.println("Hey");
     }
