@@ -21,12 +21,13 @@ const char *host = "esp32";
 const char *ssid = "HUAWEI-V4XU";
 const char *password = "Tataycruz";
 
-const char *firebaseApiKey = "";
+const char *firebaseApiKey = "AIzaSyC9ptugG-7U8EcTXQk-5nCje3OvAvrXHMw";
 const char *firebaseDbUrl = "https://airquality-6d70f-default-rtdb.asia-southeast1.firebasedatabase.app/";
 
 FirebaseData fb_dataObject;
 FirebaseAuth fb_auth;
 FirebaseConfig fb_config;
+bool signupOk = false;
 
 AsyncWebServer server2(80); // HTTP server descriptor assigned to port 80, used by the OTA and webserial server
 
@@ -44,6 +45,7 @@ float r0Calibration;
 sensorValue_t sensorValues[3];
 
 void readGasSensor() {
+  digitalWrite(LED_BUILTIN, 1);
   // The ADC of the GPIO pins are shared with the ADC used by the
   // WiFi antenna. To use analogRead, we first need to disconnect
   // WiFi and then reconnect after
@@ -57,6 +59,14 @@ void readGasSensor() {
   }
 
   WiFi.begin(ssid, password);
+  // Wait for connection
+  while (WiFi.status() != WL_CONNECTED) {
+    digitalWrite(LED_BUILTIN, 0);
+    delay(250);
+    digitalWrite(LED_BUILTIN, 1);
+    delay(250);
+  }
+  digitalWrite(LED_BUILTIN, 0);
 }
 
 void receiveWebSerial(uint8_t* data, size_t len) {
@@ -115,6 +125,13 @@ void receiveWebSerial(uint8_t* data, size_t len) {
     struct tm tempTime;
     getLocalTime(&tempTime);
     WebSerial.println(asctime(&tempTime));
+  }
+
+  if (d.equals("firebase status")) {
+    WebSerial.print("Ready: ");
+    WebSerial.println(Firebase.ready());
+    WebSerial.print("SignupOK: ");
+    WebSerial.println(signupOk);
   }
 }
 
@@ -198,6 +215,10 @@ void setup(void) {
     fb_auth.user.email = ""; // Anonymous login
     fb_auth.user.password = "";
 
+    if (Firebase.signUp(&fb_config, &fb_auth, fb_auth.user.email, fb_auth.user.password)) {
+      signupOk = true;
+    }
+
     Firebase.begin(&fb_config, &fb_auth);
     // Don't let firebase library control wifi auto connect,
     // we want to control this on our own
@@ -211,38 +232,61 @@ void setup(void) {
   digitalWrite(LED_BUILTIN, LOW);
 }
 
-void writeToFirebase(char* path, float value) {
-  if (Firebase.RTDB.setFloat(&fb_dataObject, path, value)) {
-    // If write successful
+void writeToFirebase() {
+  sensorValues[0].ppmReading;
+  sensorValues[0].rawAnalogRead;
+  sensorValues[0].readAt;
+
+  // Since sensor reading is done three times at a time, we can get the average
+  // of the last sensor readings to mitigate errors in the data
+  float averagePpmSample = (sensorValues[0].ppmReading +
+                           sensorValues[1].ppmReading +
+                           sensorValues[2].ppmReading) / 3;
+
+  int averageAnalogValueSample = (sensorValues[0].rawAnalogRead +
+                           sensorValues[1].rawAnalogRead +
+                           sensorValues[2].rawAnalogRead) / 3;
+
+  const char* path =  "devices/james-esp32/";
+  tm tempTime = sensorValues[0].readAt;
+  char fullPath[128];
+  snprintf(fullPath, sizeof(fullPath), "%s%d/%s", path, mktime(&tempTime), "ppm");
+
+  if (Firebase.RTDB.setFloat(&fb_dataObject, fullPath, averagePpmSample)) {
+    WebSerial.println(fb_dataObject.dataPath());
   } else {
-    // If write failed
+    WebSerial.println(fb_dataObject.errorReason());
+  }
+      
+  snprintf(fullPath, sizeof(fullPath), "%s%d/%s", path, mktime(&tempTime), "rawAnalog");
+  if (Firebase.RTDB.setInt(&fb_dataObject, fullPath, averageAnalogValueSample)) {
+    WebSerial.println(fb_dataObject.dataPath());
+  } else {
+    WebSerial.println(fb_dataObject.errorReason());
+  }
+
+  snprintf(fullPath, sizeof(fullPath), "%s%d/%s", path, mktime(&tempTime), "readAt");
+  if (Firebase.RTDB.setInt(&fb_dataObject, fullPath, mktime(&tempTime))) {
+    WebSerial.println(fb_dataObject.dataPath());
+  } else {
+    WebSerial.println(fb_dataObject.errorReason());
   }
 }
 
 unsigned long millisSinceLastReady = 0;
 
 void loop(void) {
-  if (otaFlashMode == 0) {
-    if (Firebase.ready() && (millis() - millisSinceLastReady > 15000 || millisSinceLastReady == 0)) {
+  if (otaFlashMode == 0 && (millis() - millisSinceLastReady > 30000 || millisSinceLastReady == 0)) {
+    WebSerial.println("Reading gas sensor, temporarily turning off WiFi");
+    readGasSensor();
+    if (Firebase.ready() && signupOk) {
       millisSinceLastReady = millis();
       // Firebase.ready() should be repeatedly called but with a set interval
       // of 15s to prevent spam. We can't use the delay() function because that
       // blocks the CPU and disables other function calls, hence we use the millis
       // timer, and manually check for every 15th second, we send Firebase.ready() and other
       // fb related operations
-
-      
-
-      WebSerial.println("Hey");
+      writeToFirebase();
     }
-    // WebSerial.println("Hey");
-
-    // for (int i = 0; i < 3; ++i) {
-    //   WebSerial.print("GAS: ");
-    //   WebSerial.println(sensorValues[i]);
-    //   delay(50);
-    // }
-
-    // delay(5000);
   }
 }
