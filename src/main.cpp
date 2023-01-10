@@ -9,7 +9,8 @@
 
 #include <MQ135.h>
 
-#include <FirebaseESP32.h>
+#include <Firebase.h>
+#include <FirebaseJson.h>
 #include <addons/TokenHelper.h>
 #include <addons/RTDBHelper.h>
 
@@ -247,30 +248,39 @@ void writeToFirebase() {
                            sensorValues[1].rawAnalogRead +
                            sensorValues[2].rawAnalogRead) / 3;
 
-  const char* path =  "devices/james-esp32/";
+  // const char* path =  "devices/james-esp32/";
   tm tempTime = sensorValues[0].readAt;
-  char fullPath[128];
-  snprintf(fullPath, sizeof(fullPath), "%s%d/%s", path, mktime(&tempTime), "ppm");
 
-  if (Firebase.RTDB.setFloat(&fb_dataObject, fullPath, averagePpmSample)) {
+  FirebaseJson obj;
+  obj.add("ppm", averagePpmSample);
+  obj.add("rawAnalog", averageAnalogValueSample);
+  obj.add("readAt", mktime(&tempTime));
+
+  if (Firebase.RTDB.pushJSON(&fb_dataObject, "devices/james-esp32", &obj)) {
     WebSerial.println(fb_dataObject.dataPath());
   } else {
     WebSerial.println(fb_dataObject.errorReason());
   }
+
+  // if (Firebase.RTDB.setFloat(&fb_dataObject, fullPath, averagePpmSample)) {
+  //   WebSerial.println(fb_dataObject.dataPath());
+  // } else {
+  //   WebSerial.println(fb_dataObject.errorReason());
+  // }
       
-  snprintf(fullPath, sizeof(fullPath), "%s%d/%s", path, mktime(&tempTime), "rawAnalog");
-  if (Firebase.RTDB.setInt(&fb_dataObject, fullPath, averageAnalogValueSample)) {
-    WebSerial.println(fb_dataObject.dataPath());
-  } else {
-    WebSerial.println(fb_dataObject.errorReason());
-  }
+  // snprintf(fullPath, sizeof(fullPath), "%s%d/%s", path, mktime(&tempTime), "rawAnalog");
+  // if (Firebase.RTDB.setInt(&fb_dataObject, fullPath, averageAnalogValueSample)) {
+  //   WebSerial.println(fb_dataObject.dataPath());
+  // } else {
+  //   WebSerial.println(fb_dataObject.errorReason());
+  // }
 
-  snprintf(fullPath, sizeof(fullPath), "%s%d/%s", path, mktime(&tempTime), "readAt");
-  if (Firebase.RTDB.setInt(&fb_dataObject, fullPath, mktime(&tempTime))) {
-    WebSerial.println(fb_dataObject.dataPath());
-  } else {
-    WebSerial.println(fb_dataObject.errorReason());
-  }
+  // snprintf(fullPath, sizeof(fullPath), "%s%d/%s", path, mktime(&tempTime), "readAt");
+  // if (Firebase.RTDB.setInt(&fb_dataObject, fullPath, mktime(&tempTime))) {
+  //   WebSerial.println(fb_dataObject.dataPath());
+  // } else {
+  //   WebSerial.println(fb_dataObject.errorReason());
+  // }
 }
 
 unsigned long millisSinceLastReady = 0;
