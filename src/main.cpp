@@ -172,6 +172,9 @@ void initializeWifiAndOTA() {
 
 void setup(void) {
   pinMode(OTA_MODE_EN, INPUT);
+  pinMode(GAS_SENSOR, INPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
+
   if (digitalRead(OTA_MODE_EN) == 0) {
     // Pull GPIO 13 low if you want to enable to ota flash mode
     otaFlashMode = 1;
@@ -181,13 +184,12 @@ void setup(void) {
 
   // Calibrate and test the sensor before WiFi is turned on
   // because we can no longer use analogRead once WiFi radio is on
-  pinMode(GAS_SENSOR, INPUT);
   r0Calibration = sensor.getRZero();
-  for (int i = 0; i < 3; ++i) {
-    sensorValues[i].rawAnalogRead = analogRead(GAS_SENSOR);
-    sensorValues[i].ppmReading = sensor.getPPM();
-    delay(1000);
-  }
+  // for (int i = 0; i < 3; ++i) {
+  //   sensorValues[i].rawAnalogRead = analogRead(GAS_SENSOR);
+  //   sensorValues[i].ppmReading = sensor.getPPM();
+  //   delay(1000);
+  // }
 
   Serial.begin(115200);
 
@@ -216,11 +218,12 @@ void setup(void) {
     fb_auth.user.email = ""; // Anonymous login
     fb_auth.user.password = "";
 
+    // Login to fb
     if (Firebase.signUp(&fb_config, &fb_auth, fb_auth.user.email, fb_auth.user.password)) {
       signupOk = true;
     }
 
-    Firebase.begin(&fb_config, &fb_auth);
+    Firebase.begin(&fb_config, &fb_auth);  // Connect to db
     // Don't let firebase library control wifi auto connect,
     // we want to control this on our own
     Firebase.reconnectWiFi(false); 
@@ -229,15 +232,10 @@ void setup(void) {
 
   // If all goes well, turn on the buil-in red LED of the ESP32
   // Note that LED_BUILTIN has reverse logic, writing LOW to it turns it on
-  pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
 }
 
 void writeToFirebase() {
-  sensorValues[0].ppmReading;
-  sensorValues[0].rawAnalogRead;
-  sensorValues[0].readAt;
-
   // Since sensor reading is done three times at a time, we can get the average
   // of the last sensor readings to mitigate errors in the data
   float averagePpmSample = (sensorValues[0].ppmReading +
