@@ -45,6 +45,9 @@ float r0Calibration;
 // int sensorValues[3];
 sensorValue_t sensorValues[3];
 
+String lastFirebaseMsg = "0";
+String lastFirebaseErr = "0";
+
 void readGasSensor() {
   digitalWrite(LED_BUILTIN, 1);
   // The ADC of the GPIO pins are shared with the ADC used by the
@@ -134,6 +137,13 @@ void receiveWebSerial(uint8_t* data, size_t len) {
     WebSerial.print("SignupOK: ");
     WebSerial.println(signupOk);
   }
+
+  if (d.equals("firebase last")) {
+    WebSerial.print("Msg: ");
+    WebSerial.println(lastFirebaseMsg);
+    WebSerial.print("Err: ");
+    WebSerial.println(lastFirebaseErr);
+  }
 }
 
 void initializeWifiAndOTA() {
@@ -192,6 +202,7 @@ void setup(void) {
   // }
 
   Serial.begin(115200);
+  Serial.println("Serial connected");
 
   // Since our ESP32-CAM does not have a micro USB connector, there are 2 options:
   // 1.) Use a separate programmer board that plugs in to the TX and RX pins 
@@ -255,30 +266,10 @@ void writeToFirebase() {
   obj.add("readAt", mktime(&tempTime));
 
   if (Firebase.RTDB.pushJSON(&fb_dataObject, "devices/james-esp32", &obj)) {
-    WebSerial.println(fb_dataObject.dataPath());
+    lastFirebaseMsg = fb_dataObject.dataPath();
   } else {
-    WebSerial.println(fb_dataObject.errorReason());
+    lastFirebaseErr = fb_dataObject.errorReason();
   }
-
-  // if (Firebase.RTDB.setFloat(&fb_dataObject, fullPath, averagePpmSample)) {
-  //   WebSerial.println(fb_dataObject.dataPath());
-  // } else {
-  //   WebSerial.println(fb_dataObject.errorReason());
-  // }
-      
-  // snprintf(fullPath, sizeof(fullPath), "%s%d/%s", path, mktime(&tempTime), "rawAnalog");
-  // if (Firebase.RTDB.setInt(&fb_dataObject, fullPath, averageAnalogValueSample)) {
-  //   WebSerial.println(fb_dataObject.dataPath());
-  // } else {
-  //   WebSerial.println(fb_dataObject.errorReason());
-  // }
-
-  // snprintf(fullPath, sizeof(fullPath), "%s%d/%s", path, mktime(&tempTime), "readAt");
-  // if (Firebase.RTDB.setInt(&fb_dataObject, fullPath, mktime(&tempTime))) {
-  //   WebSerial.println(fb_dataObject.dataPath());
-  // } else {
-  //   WebSerial.println(fb_dataObject.errorReason());
-  // }
 }
 
 unsigned long millisSinceLastReady = 0;
@@ -288,13 +279,14 @@ void loop(void) {
     WebSerial.println("Reading gas sensor, temporarily turning off WiFi");
     readGasSensor();
     if (Firebase.ready() && signupOk) {
-      millisSinceLastReady = millis();
       // Firebase.ready() should be repeatedly called but with a set interval
       // of 15s to prevent spam. We can't use the delay() function because that
       // blocks the CPU and disables other function calls, hence we use the millis
-      // timer, and manually check for every 15th second, we send Firebase.ready() and other
+      // timer, and manually check for every 30th second, we send Firebase.ready() and other
       // fb related operations
       writeToFirebase();
+
+      millisSinceLastReady = millis();
     }
   }
 }
